@@ -1,0 +1,13 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: dev-local-tls
+  namespace: default
+spec:
+  secretName: dev-local-tls
+  issuerRef:
+    name: mkcert
+    kind: ClusterIssuer
+  dnsNames:
+    - "*.dev.local"
+    - "dev.local"

@@ -1,0 +1,13 @@
+---
+# Day-to-day startup — no sudo required.
+# Starts k3s and deploys everything via Flux.
+# Run with: make up
+- name: Start k3s and deploy via Flux
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  become: false
+
+  roles:
+    - k3s
+    - flux

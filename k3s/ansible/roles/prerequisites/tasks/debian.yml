@@ -1,0 +1,101 @@
+---
+- name: Install jq and uidmap via apt
+  ansible.builtin.apt:
+    name:
+      - jq
+      - uidmap
+    state: present
+    update_cache: true
+  become: true
+
+- name: Install mkcert dependencies
+  ansible.builtin.apt:
+    name:
+      - libnss3-tools
+    state: present
+  become: true
+
+- name: Check if mkcert is installed
+  ansible.builtin.command: mkcert --version
+  register: mkcert_installed
+  changed_when: false
+  failed_when: false
+
+- name: Install mkcert
+  when: mkcert_installed.rc != 0
+  block:
+    - name: Download mkcert binary
+      ansible.builtin.get_url:
+        url: "https://dl.filippo.io/mkcert/latest?for=linux/amd64"
+        dest: /usr/local/bin/mkcert
+        mode: "0755"
+      become: true
+
+- name: Install mkcert CA into system trust store
+  ansible.builtin.command: mkcert -install
+  changed_when: false
+  become: true
+
+- name: Check if kubectl is installed
+  ansible.builtin.command: kubectl version --client
+  register: kubectl_installed
+  changed_when: false
+  failed_when: false
+
+- name: Install kubectl
+  when: kubectl_installed.rc != 0
+  block:
+    - name: Get latest kubectl version
+      ansible.builtin.uri:
+        url: https://dl.k8s.io/release/stable.txt
+        return_content: true
+      register: kubectl_version
+
+    - name: Download kubectl binary
+      ansible.builtin.get_url:
+        url: "https://dl.k8s.io/release/{{ kubectl_version.content | trim }}/bin/linux/amd64/kubectl"
+        dest: /usr/local/bin/kubectl
+        mode: "0755"
+      become: true
+
+- name: Check if helm is installed
+  ansible.builtin.command: helm version --short
+  register: helm_installed
+  changed_when: false
+  failed_when: false
+
+- name: Install helm
+  when: helm_installed.rc != 0
+  block:
+    - name: Download helm install script
+      ansible.builtin.get_url:
+        url: https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+        dest: /tmp/get-helm-3.sh
+        mode: "0755"
+
+    - name: Run helm install script
+      ansible.builtin.command: /tmp/get-helm-3.sh
+      become: true
+      changed_when: true
+
+- name: Check if flux CLI is installed
+  ansible.builtin.command: flux --version
+  register: flux_installed
+  changed_when: false
+  failed_when: false
+
+- name: Install flux CLI
+  when: flux_installed.rc != 0
+  block:
+    - name: Download flux CLI
+      ansible.builtin.get_url:
+        url: "https://github.com/fluxcd/flux2/releases/download/v{{ flux_version }}/flux_{{ flux_version }}_linux_amd64.tar.gz"
+        dest: /tmp/flux.tar.gz
+        mode: "0644"
+
+    - name: Extract flux CLI
+      ansible.builtin.unarchive:
+        src: /tmp/flux.tar.gz
+        dest: /usr/local/bin
+        remote_src: true
+      become: true

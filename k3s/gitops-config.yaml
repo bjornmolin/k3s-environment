@@ -1,0 +1,19 @@
+# Git repository for application deployments.
+# Flux watches this repo and auto-deploys changes.
+gitops:
+  url: ssh://git@forgejo-ssh.forgejo.svc.cluster.local/gitops/wallet-local-gitops.git
+  branch: main
+  # How often Flux polls for changes
+  interval: 1m
+
+# Container image builds.
+# Each entry defines a source repo to watch and build with Kaniko.
+# Images are pushed to the in-cluster Zot registry.
+# Flux Image Automation updates the gitops repo with new tags.
+builds: []
+  # Example:
+  # - name: wallet-bff-ws
+  #   repo: ssh://git@github.com/diggsweden/wallet-bff-ws.git
+  #   dockerfile: Dockerfile
+  #   context: "."
+  #   image: registry.dev.local/wallet/bff-ws
