@@ -13,6 +13,18 @@
       become: true
       changed_when: true
 
+- name: Enable and start k3s service
+  ansible.builtin.systemd:
+    name: k3s
+    enabled: true
+    state: started
+  become: true
+
+- name: Wait for k3s manifests directory
+  ansible.builtin.wait_for:
+    path: /var/lib/rancher/k3s/server/manifests
+    timeout: 60
+
 - name: Get upstream DNS server
   ansible.builtin.shell: |
     if [ -f /run/systemd/resolve/resolv.conf ]; then
@@ -64,13 +76,6 @@
                 - name: loadbalance
     dest: /var/lib/rancher/k3s/server/manifests/coredns-custom.yaml
     mode: "0644"
-  become: true
-
-- name: Enable and start k3s service
-  ansible.builtin.systemd:
-    name: k3s
-    enabled: true
-    state: started
   become: true
 
 - name: Copy kubeconfig
