@@ -87,6 +87,44 @@
       become: true
       changed_when: true
 
+- name: Check if kubeseal is installed
+  ansible.builtin.command: kubeseal --version
+  register: kubeseal_installed
+  changed_when: false
+  failed_when: false
+
+- name: Install kubeseal
+  when: kubeseal_installed.rc != 0
+  block:
+    - name: Download kubeseal
+      ansible.builtin.get_url:
+        url: "https://github.com/bitnami-labs/sealed-secrets/releases/latest/download/kubeseal-0.29.0-linux-amd64.tar.gz"
+        dest: /tmp/kubeseal.tar.gz
+        mode: "0644"
+
+    - name: Extract kubeseal
+      ansible.builtin.unarchive:
+        src: /tmp/kubeseal.tar.gz
+        dest: /usr/local/bin
+        remote_src: true
+      become: true
+
+- name: Check if cosign is installed
+  ansible.builtin.command: cosign version
+  register: cosign_installed
+  changed_when: false
+  failed_when: false
+
+- name: Install cosign
+  when: cosign_installed.rc != 0
+  block:
+    - name: Download cosign
+      ansible.builtin.get_url:
+        url: "https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64"
+        dest: /usr/local/bin/cosign
+        mode: "0755"
+      become: true
+
 - name: Check if flux CLI is installed
   ansible.builtin.command: flux --version
   register: flux_installed
