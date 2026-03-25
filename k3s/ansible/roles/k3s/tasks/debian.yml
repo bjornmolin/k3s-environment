@@ -34,8 +34,9 @@
     src: /usr/local/bin/k3s
     dest: /usr/local/bin/kubectl
     state: link
+    force: true
   become: true
-  when: not (ansible_env.PATH is search('/usr/local/bin/kubectl'))
+  failed_when: false
 
 - name: Check if nerdctl is installed
   ansible.builtin.command: nerdctl --version
