@@ -9,7 +9,7 @@
   block:
     - name: Download and run k3s install script
       ansible.builtin.shell: >
-        curl -sfL https://get.k3s.io | sh -s - --disable=traefik --disable=servicelb --flannel-backend=none --disable-network-policy --disable-kube-proxy --write-kubeconfig-mode 644
+        curl -sfL https://get.k3s.io | sh -s - --disable=traefik --disable=servicelb --flannel-backend=none --disable-network-policy --disable-kube-proxy --write-kubeconfig-mode 644 --resolv-conf /run/systemd/resolve/resolv.conf
       become: true
       changed_when: true
 
