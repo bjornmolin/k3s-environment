@@ -1,19 +1,12 @@
 # Git repository for application deployments.
-# Flux watches this repo and auto-deploys changes.
+# Phase 1: Flux bootstraps from this URL (GitHub)
+# Phase 2: Repo is mirrored to in-cluster Forgejo, Flux switches to Forgejo
 gitops:
   url: ssh://git@github.com/bjornmolin/wallet-local-gitops.git
   branch: main
-  # How often Flux polls for changes
   interval: 1m
+  # Public URL to mirror into Forgejo on first boot
+  forgejo_mirror: https://github.com/bjornmolin/wallet-local-gitops.git
 
-# Container image builds.
-# Each entry defines a source repo to watch and build with Kaniko.
-# Images are pushed to the in-cluster Zot registry.
-# Flux Image Automation updates the gitops repo with new tags.
+# Container image builds (Forgejo Actions + Buildah + Cosign)
 builds: []
-  # Example:
-  # - name: wallet-bff-ws
-  #   repo: ssh://git@github.com/diggsweden/wallet-bff-ws.git
-  #   dockerfile: Dockerfile
-  #   context: "."
-  #   image: registry.dev.local/wallet/bff-ws

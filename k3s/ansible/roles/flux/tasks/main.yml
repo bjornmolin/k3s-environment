@@ -298,6 +298,143 @@
   register: gitops_source
   until: "'True' in gitops_source.stdout"
 
+# --- Phase 2: Migrate gitops repo to in-cluster Forgejo ---
+
+- name: Set Forgejo API base URL (in-cluster)
+  ansible.builtin.set_fact:
+    forgejo_api: "http://forgejo-http.forgejo.svc.cluster.local:3000/api/v1"
+
+- name: Get Forgejo admin password
+  ansible.builtin.shell: >
+    kubectl get secret forgejo-admin -n forgejo
+    -o jsonpath='{.data.password}' | base64 -d
+  register: forgejo_admin_pw
+  changed_when: false
+
+- name: Check if gitops user exists in Forgejo
+  ansible.builtin.shell: >
+    kubectl run forgejo-api-check --rm -i --restart=Never --image=curlimages/curl --
+    curl -sf -o /dev/null -w '%{http_code}' {{ forgejo_api }}/users/gitops
+  register: gitops_user_check
+  changed_when: false
+  failed_when: false
+
+- name: Create gitops user in Forgejo
+  when: "'404' in gitops_user_check.stdout"
+  ansible.builtin.shell: |
+    GITOPS_PW=$(openssl rand -base64 16)
+    kubectl run forgejo-api-create-user --rm -i --restart=Never --image=curlimages/curl -- \
+      curl -sf -X POST {{ forgejo_api }}/admin/users \
+      -H 'Content-Type: application/json' \
+      -u "forgejo_admin:{{ forgejo_admin_pw.stdout }}" \
+      -d "{\"username\":\"gitops\",\"password\":\"$GITOPS_PW\",\"email\":\"gitops@dev.local\",\"must_change_password\":false}"
+  changed_when: true
+
+- name: Check if gitops repo exists in Forgejo
+  ansible.builtin.shell: >
+    kubectl run forgejo-api-check-repo --rm -i --restart=Never --image=curlimages/curl --
+    curl -sf -o /dev/null -w '%{http_code}' {{ forgejo_api }}/repos/gitops/wallet-local-gitops
+  register: gitops_repo_check
+  changed_when: false
+  failed_when: false
+
+- name: Mirror GitHub repo to Forgejo
+  when: "'404' in gitops_repo_check.stdout and gitops.forgejo_mirror is defined"
+  ansible.builtin.shell: >
+    kubectl run forgejo-api-migrate --rm -i --restart=Never --image=curlimages/curl --
+    curl -sf -X POST {{ forgejo_api }}/repos/migrate
+    -H 'Content-Type: application/json'
+    -u "forgejo_admin:{{ forgejo_admin_pw.stdout }}"
+    -d '{"clone_addr":"{{ gitops.forgejo_mirror }}","repo_name":"wallet-local-gitops","repo_owner":"gitops","service":"github"}'
+  changed_when: true
+
+- name: Generate Forgejo SSH deploy key and switch Flux source
+  block:
+    - name: Check if Forgejo gitops-ssh-key already configured
+      ansible.builtin.shell: >
+        kubectl get secret gitops-ssh-key -n flux-system
+        -o jsonpath='{.data.known_hosts}' | base64 -d | grep -q forgejo
+      register: forgejo_key_check
+      changed_when: false
+      failed_when: false
+
+    - name: Create SSH key and configure for Forgejo
+      when: forgejo_key_check.rc != 0
+      block:
+        - name: Generate SSH key pair
+          ansible.builtin.shell: |
+            TMPDIR=$(mktemp -d)
+            ssh-keygen -t ecdsa -b 384 -f "$TMPDIR/identity" -N "" -q
+            echo "$TMPDIR"
+          register: ssh_tmpdir
+          changed_when: false
+
+        - name: Get Forgejo SSH host key
+          ansible.builtin.shell: >
+            kubectl exec -n forgejo deploy/forgejo -c forgejo -- cat /data/ssh/gitea.rsa.pub
+          register: forgejo_host_key
+          changed_when: false
+
+        - name: Replace gitops-ssh-key secret for Forgejo
+          ansible.builtin.shell: |
+            kubectl delete secret gitops-ssh-key -n flux-system 2>/dev/null || true
+            kubectl create secret generic gitops-ssh-key -n flux-system \
+              --from-file=identity="{{ ssh_tmpdir.stdout }}/identity" \
+              --from-file=identity.pub="{{ ssh_tmpdir.stdout }}/identity.pub" \
+              --from-literal=known_hosts="forgejo-ssh.forgejo.svc.cluster.local {{ forgejo_host_key.stdout }}"
+          changed_when: true
+
+        - name: Get deploy key public key
+          ansible.builtin.shell: cat "{{ ssh_tmpdir.stdout }}/identity.pub"
+          register: forgejo_deploy_pub_key
+          changed_when: false
+
+        - name: Add deploy key to Forgejo repo
+          ansible.builtin.shell: >
+            kubectl run forgejo-api-add-key --rm -i --restart=Never --image=curlimages/curl --
+            curl -sf -X POST {{ forgejo_api }}/repos/gitops/wallet-local-gitops/keys
+            -H 'Content-Type: application/json'
+            -u "forgejo_admin:{{ forgejo_admin_pw.stdout }}"
+            -d '{"title":"flux-gitops","key":"{{ forgejo_deploy_pub_key.stdout }}","read_only":false}'
+          changed_when: true
+          failed_when: false
+
+        - name: Clean up temp SSH key
+          ansible.builtin.file:
+            path: "{{ ssh_tmpdir.stdout }}"
+            state: absent
+
+    - name: Update GitRepository to point at Forgejo
+      ansible.builtin.shell: |
+        cat <<'EOF' | kubectl apply -f -
+        apiVersion: source.toolkit.fluxcd.io/v1
+        kind: GitRepository
+        metadata:
+          name: wallet-local-gitops
+          namespace: flux-system
+        spec:
+          interval: 1m
+          url: ssh://git@forgejo-ssh.forgejo.svc.cluster.local/gitops/wallet-local-gitops.git
+          ref:
+            branch: main
+          secretRef:
+            name: gitops-ssh-key
+        EOF
+      register: forgejo_gitrepo
+      changed_when: "'configured' in forgejo_gitrepo.stdout or 'created' in forgejo_gitrepo.stdout"
+
+    - name: Restart source-controller to pick up new secret
+      ansible.builtin.command: kubectl rollout restart deployment source-controller -n flux-system
+      changed_when: false
+
+    - name: Wait for Forgejo gitops source to be ready
+      ansible.builtin.command: flux get source git wallet-local-gitops
+      changed_when: false
+      retries: 10
+      delay: 10
+      register: forgejo_gitops_source
+      until: "'True' in forgejo_gitops_source.stdout"
+
 # --- Build infrastructure + cosign ---
 
 - name: Apply build infrastructure
