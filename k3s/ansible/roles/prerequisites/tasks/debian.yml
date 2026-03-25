@@ -96,9 +96,15 @@
 - name: Install kubeseal
   when: kubeseal_installed.rc != 0
   block:
+    - name: Get latest kubeseal version
+      ansible.builtin.shell: >
+        curl -s https://api.github.com/repos/bitnami-labs/sealed-secrets/releases/latest | grep tag_name | cut -d'"' -f4
+      register: kubeseal_version
+      changed_when: false
+
     - name: Download kubeseal
       ansible.builtin.get_url:
-        url: "https://github.com/bitnami-labs/sealed-secrets/releases/latest/download/kubeseal-0.29.0-linux-amd64.tar.gz"
+        url: "https://github.com/bitnami-labs/sealed-secrets/releases/download/{{ kubeseal_version.stdout }}/kubeseal-{{ kubeseal_version.stdout | regex_replace('^v', '') }}-linux-amd64.tar.gz"
         dest: /tmp/kubeseal.tar.gz
         mode: "0644"
 
