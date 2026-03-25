@@ -13,6 +13,59 @@
       become: true
       changed_when: true
 
+- name: Get upstream DNS server
+  ansible.builtin.shell: |
+    if [ -f /run/systemd/resolve/resolv.conf ]; then
+      grep '^nameserver' /run/systemd/resolve/resolv.conf | head -1 | awk '{print $2}'
+    else
+      echo "8.8.8.8"
+    fi
+  register: upstream_dns
+  changed_when: false
+
+- name: Configure CoreDNS to use upstream DNS directly
+  ansible.builtin.copy:
+    content: |
+      apiVersion: helm.cattle.io/v1
+      kind: HelmChartConfig
+      metadata:
+        name: coredns
+        namespace: kube-system
+      spec:
+        valuesContent: |-
+          servers:
+            - zones:
+                - zone: .
+              port: 53
+              plugins:
+                - name: errors
+                - name: health
+                  configBlock: lameduck 5s
+                - name: ready
+                - name: kubernetes
+                  parameters: cluster.local in-addr.arpa ip6.arpa
+                  configBlock: |-
+                    pods insecure
+                    fallthrough in-addr.arpa ip6.arpa
+                - name: hosts
+                  parameters: /etc/coredns/NodeHosts
+                  configBlock: |-
+                    ttl 60
+                    reload 15s
+                    fallthrough
+                - name: prometheus
+                  parameters: :9153
+                - name: forward
+                  parameters: . {{ upstream_dns.stdout }}
+                - name: cache
+                  parameters: 30
+                - name: loop
+                - name: reload
+                - name: loadbalance
+    dest: /var/lib/rancher/k3s/server/manifests/coredns-custom.yaml
+    mode: "0644"
+  become: true
+
 - name: Enable and start k3s service
   ansible.builtin.systemd:
     name: k3s
