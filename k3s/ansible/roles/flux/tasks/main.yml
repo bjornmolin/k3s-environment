@@ -11,6 +11,13 @@
   register: gwapi_apply
   changed_when: "'configured' in gwapi_apply.stdout or 'created' in gwapi_apply.stdout"
 
+- name: Flush stale Cilium iptables rules (Linux)
+  ansible.builtin.shell: |
+    sudo iptables -t nat -F OLD_CILIUM_POST_nat 2>/dev/null || true
+    sudo iptables -t nat -X OLD_CILIUM_POST_nat 2>/dev/null || true
+  changed_when: false
+  when: ansible_os_family == "Debian"
+
 - name: Check if Cilium is installed
   ansible.builtin.command: helm status cilium -n kube-system
   register: cilium_check
@@ -52,13 +59,7 @@
   register: nodes_ready
   until: nodes_ready.rc == 0
 
-# --- Now install Flux (pods can schedule with Cilium CNI) ---
-
-- name: Check if Flux is already installed
-  ansible.builtin.command: kubectl get namespace flux-system
-  register: flux_ns_check
-  changed_when: false
-  failed_when: false
+# --- Flux ---
 
 - name: Install Flux controllers (with image automation)
   ansible.builtin.command: >
@@ -75,6 +76,8 @@
   register: flux_check
   until: flux_check.rc == 0
 
+# --- Infrastructure: sources + namespaces ---
+
 - name: Apply HelmRepository sources
   ansible.builtin.command: kubectl apply -k {{ flux_base_path }}/infrastructure/sources
   register: sources_apply
@@ -84,6 +87,8 @@
   ansible.builtin.command: kubectl apply -k {{ flux_base_path }}/infrastructure/namespaces
   register: ns_apply
   changed_when: "'configured' in ns_apply.stdout or 'created' in ns_apply.stdout"
+
+# --- cert-manager ---
 
 - name: Apply cert-manager HelmRelease
   ansible.builtin.command: "kubectl apply -k {{ flux_base_path }}/infrastructure/cert-manager"
@@ -144,7 +149,9 @@
       become: true
       changed_when: false
 
-- name: Apply sealed-secrets first
+# --- Sealed Secrets ---
+
+- name: Apply sealed-secrets
   ansible.builtin.command: "kubectl apply -k {{ flux_base_path }}/infrastructure/sealed-secrets"
   register: ss_apply
   changed_when: "'configured' in ss_apply.stdout or 'created' in ss_apply.stdout"
@@ -157,7 +164,7 @@
   register: ss_ready
   until: "'True' in ss_ready.stdout"
 
-# --- Generate and seal secrets ---
+# --- Seal secrets ---
 
 - name: Check if Forgejo admin secret exists
   ansible.builtin.command: kubectl get secret forgejo-admin -n forgejo
@@ -171,23 +178,6 @@
     PASSWORD=$(openssl rand -base64 16)
     kubectl create secret generic forgejo-admin \
       --from-literal=username=forgejo_admin \
-      --from-literal=password="$PASSWORD" \
-      -n forgejo --dry-run=client -o yaml | \
-    kubeseal --controller-name=sealed-secrets --controller-namespace=kube-system --format yaml | kubectl apply -f -
-  changed_when: true
-
-- name: Check if gitops user secret exists
-  ansible.builtin.command: kubectl get secret forgejo-gitops-user -n forgejo
-  register: gitops_user_secret
-  changed_when: false
-  failed_when: false
-
-- name: Generate and seal gitops user secret
-  when: gitops_user_secret.rc != 0
-  ansible.builtin.shell: |
-    PASSWORD=$(openssl rand -base64 16)
-    kubectl create secret generic forgejo-gitops-user \
-      --from-literal=username=gitops \
       --from-literal=password="$PASSWORD" \
       -n forgejo --dry-run=client -o yaml | \
     kubeseal --controller-name=sealed-secrets --controller-namespace=kube-system --format yaml | kubectl apply -f -
@@ -243,89 +233,7 @@
   register: infra_apply2
   changed_when: "'configured' in infra_apply2.stdout or 'created' in infra_apply2.stdout"
 
-# --- Forgejo: create gitops user and repo ---
-
-- name: Get Forgejo admin password from sealed secret
-  ansible.builtin.shell: >
-    kubectl get secret forgejo-admin -n forgejo
-    -o jsonpath='{.data.password}' | base64 -d
-  register: forgejo_admin_pw
-  changed_when: false
-
-- name: Get gitops user password from sealed secret
-  ansible.builtin.shell: >
-    kubectl get secret forgejo-gitops-user -n forgejo
-    -o jsonpath='{.data.password}' | base64 -d
-  register: gitops_user_pw
-  changed_when: false
-
-- name: Set Forgejo API base URL (in-cluster)
-  ansible.builtin.set_fact:
-    forgejo_api: "http://forgejo-http.forgejo.svc.cluster.local:3000/api/v1"
-
-- name: Wait for Forgejo API to be ready
-  ansible.builtin.shell: >
-    kubectl run forgejo-check --rm -i --restart=Never --image=curlimages/curl --
-    curl -sf {{ forgejo_api }}/version
-  changed_when: false
-  retries: 10
-  delay: 10
-  register: forgejo_ready
-  until: forgejo_ready.rc == 0
-
-- name: Check if gitops user exists in Forgejo
-  ansible.builtin.shell: >
-    kubectl run forgejo-api --rm -i --restart=Never --image=curlimages/curl --
-    curl -sf -o /dev/null -w '%{http_code}' {{ forgejo_api }}/users/gitops
-  register: gitops_user_check
-  changed_when: false
-  failed_when: false
-
-- name: Create gitops user in Forgejo
-  when: "'404' in gitops_user_check.stdout"
-  ansible.builtin.shell: >
-    kubectl run forgejo-api --rm -i --restart=Never --image=curlimages/curl --
-    curl -sf -X POST {{ forgejo_api }}/admin/users
-    -H 'Content-Type: application/json'
-    -u 'forgejo_admin:{{ forgejo_admin_pw.stdout }}'
-    -d '{"username":"gitops","password":"{{ gitops_user_pw.stdout }}","email":"gitops@dev.local","must_change_password":false}'
-  changed_when: true
-
-- name: Check if gitops repo exists in Forgejo
-  ansible.builtin.shell: >
-    kubectl run forgejo-api --rm -i --restart=Never --image=curlimages/curl --
-    curl -sf -o /dev/null -w '%{http_code}' {{ forgejo_api }}/repos/gitops/wallet-local-gitops
-  register: gitops_repo_check
-  changed_when: false
-  failed_when: false
-
-- name: Create gitops repo in Forgejo
-  when: "'404' in gitops_repo_check.stdout"
-  ansible.builtin.shell: >
-    kubectl run forgejo-api --rm -i --restart=Never --image=curlimages/curl --
-    curl -sf -X POST {{ forgejo_api }}/user/repos
-    -H 'Content-Type: application/json'
-    -u 'gitops:{{ gitops_user_pw.stdout }}'
-    -d '{"name":"wallet-local-gitops","private":false,"description":"GitOps deployment manifests"}'
-  changed_when: true
-
-- name: Push gitops repo content to Forgejo via HTTPS
-  when: "'404' in gitops_repo_check.stdout"
-  ansible.builtin.shell: |
-    cd {{ playbook_dir }}/../../wallet-local-gitops 2>/dev/null || \
-    cd {{ playbook_dir }}/../../../wallet-local-gitops 2>/dev/null || true
-    if [ -d .git ]; then
-      git remote remove forgejo-gitops 2>/dev/null || true
-      ENCODED_PW=$(python3 -c "import urllib.parse; print(urllib.parse.quote('{{ gitops_user_pw.stdout }}', safe=''))")
-      git remote add forgejo-gitops "https://gitops:${ENCODED_PW}@forgejo.dev.local/gitops/wallet-local-gitops.git"
-      GIT_SSL_NO_VERIFY=1 git push forgejo-gitops main
-      git remote remove forgejo-gitops
-    else
-      echo "WARN: wallet-local-gitops repo not found locally, skipping push"
-    fi
-  changed_when: true
-
-# --- GitOps: SSH key and GitRepository ---
+# --- GitOps: configure Flux to watch gitops repo ---
 
 - name: Check if gitops SSH secret exists
   ansible.builtin.command: kubectl get secret gitops-ssh-key -n flux-system
@@ -334,19 +242,14 @@
   failed_when: false
 
 - name: Create gitops SSH deploy key
+  ansible.builtin.command: >
+    flux create secret git gitops-ssh-key
+    --url={{ gitops.url }}
+    --namespace=flux-system
   when: ssh_secret_check.rc != 0
-  ansible.builtin.shell: |
-    TMPDIR=$(mktemp -d)
-    ssh-keygen -t ecdsa -b 384 -f "$TMPDIR/identity" -N "" -q
-    FORGEJO_HOST_KEY="forgejo-ssh.forgejo.svc.cluster.local $(kubectl exec -n forgejo deploy/forgejo -c forgejo -- cat /data/ssh/gitea.rsa.pub)"
-    kubectl create secret generic gitops-ssh-key -n flux-system \
-      --from-file=identity="$TMPDIR/identity" \
-      --from-file=identity.pub="$TMPDIR/identity.pub" \
-      --from-literal=known_hosts="$FORGEJO_HOST_KEY"
-    rm -rf "$TMPDIR"
   changed_when: true
 
-- name: Add deploy key to Forgejo gitops repo
+- name: Display deploy key
   when: ssh_secret_check.rc != 0
   block:
     - name: Get deploy key public key
@@ -356,15 +259,20 @@
       register: deploy_pub_key
       changed_when: false
 
-    - name: Add deploy key to Forgejo
-      ansible.builtin.shell: >
-        kubectl run forgejo-api --rm -i --restart=Never --image=curlimages/curl --
-        curl -sf -X POST {{ forgejo_api }}/repos/gitops/wallet-local-gitops/keys
-        -H 'Content-Type: application/json'
-        -u 'gitops:{{ gitops_user_pw.stdout }}'
-        -d '{"title":"flux-gitops","key":"{{ deploy_pub_key.stdout }}","read_only":false}'
-      changed_when: true
-      failed_when: false
+    - name: Show deploy key instructions
+      ansible.builtin.debug:
+        msg: |
+          ============================================================
+          Add this deploy key to your gitops repo (with WRITE access):
+          {{ gitops.url }}
+          Settings > Deploy keys > Add deploy key
+
+          {{ deploy_pub_key.stdout }}
+          ============================================================
+
+    - name: Wait for user to add deploy key
+      ansible.builtin.pause:
+        prompt: "Press Enter after adding the deploy key"
 
 - name: Template and apply GitRepository source
   ansible.builtin.shell: |
@@ -390,12 +298,13 @@
   register: gitops_source
   until: "'True' in gitops_source.stdout"
 
-# --- Build infrastructure ---
+# --- Build infrastructure + cosign ---
 
 - name: Apply build infrastructure
   ansible.builtin.command: "kubectl apply -k {{ flux_base_path }}/infrastructure/builds"
   register: builds_apply
   changed_when: "'configured' in builds_apply.stdout or 'created' in builds_apply.stdout"
+  failed_when: false
 
 - name: Generate cosign key pair if not exists
   ansible.builtin.shell: |
@@ -407,6 +316,8 @@
     fi
   register: cosign_key
   changed_when: "'created' in cosign_key.stdout"
+
+# --- Status ---
 
 - name: Show status
   ansible.builtin.shell: |

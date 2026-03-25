@@ -1,7 +1,7 @@
 # Git repository for application deployments.
 # Flux watches this repo and auto-deploys changes.
 gitops:
-  url: ssh://git@forgejo-ssh.forgejo.svc.cluster.local/gitops/wallet-local-gitops.git
+  url: ssh://git@github.com/bjornmolin/wallet-local-gitops.git
   branch: main
   # How often Flux polls for changes
   interval: 1m
