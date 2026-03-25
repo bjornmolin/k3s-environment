@@ -21,9 +21,13 @@
   become: true
 
 - name: Wait for k3s manifests directory
-  ansible.builtin.wait_for:
-    path: /var/lib/rancher/k3s/server/manifests
-    timeout: 60
+  ansible.builtin.command: test -d /var/lib/rancher/k3s/server/manifests
+  become: true
+  changed_when: false
+  retries: 12
+  delay: 5
+  register: manifests_dir
+  until: manifests_dir.rc == 0
 
 - name: Get upstream DNS server
   ansible.builtin.shell: |
