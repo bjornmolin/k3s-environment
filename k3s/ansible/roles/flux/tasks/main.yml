@@ -358,23 +358,36 @@
           register: forgejo_deploy_pub_key
           changed_when: false
 
-        - name: Add deploy key to Forgejo repo via API
-          ansible.builtin.shell: |
-            ADMIN_PW=$(kubectl get secret forgejo-admin -n forgejo -o jsonpath='{.data.password}' | base64 -d)
-            AUTH=$(printf '%s' "forgejo_admin:$ADMIN_PW" | base64 -w0 2>/dev/null || printf '%s' "forgejo_admin:$ADMIN_PW" | base64)
-            PUB_KEY="{{ forgejo_deploy_pub_key.stdout }}"
-            kubectl exec -n forgejo deploy/forgejo -c forgejo -- \
-              wget -qO- --post-data="{\"title\":\"flux-gitops\",\"key\":\"$PUB_KEY\",\"read_only\":false}" \
-              --header="Content-Type: application/json" \
-              --header="Authorization: Basic $AUTH" \
-              http://localhost:3000/api/v1/repos/gitops/wallet-local-gitops/keys
-          changed_when: true
-          failed_when: false
-
         - name: Clean up temp SSH key
           ansible.builtin.file:
             path: "{{ ssh_tmpdir.stdout }}"
             state: absent
+
+    # Always ensure deploy key is in Forgejo (even on rerun)
+    - name: Check if deploy key exists in Forgejo
+      ansible.builtin.shell: |
+        ADMIN_PW=$(kubectl get secret forgejo-admin -n forgejo -o jsonpath='{.data.password}' | base64 -d)
+        AUTH=$(printf '%s' "forgejo_admin:$ADMIN_PW" | base64 -w0 2>/dev/null || printf '%s' "forgejo_admin:$ADMIN_PW" | base64)
+        RESULT=$(kubectl exec -n forgejo deploy/forgejo -c forgejo -- \
+          wget -qO- --header="Authorization: Basic $AUTH" \
+          http://localhost:3000/api/v1/repos/gitops/wallet-local-gitops/keys 2>/dev/null)
+        echo "$RESULT"
+      register: forgejo_keys_check
+      changed_when: false
+      failed_when: false
+
+    - name: Add deploy key to Forgejo repo
+      when: "forgejo_keys_check.stdout == '[]' or forgejo_keys_check.stdout == ''"
+      ansible.builtin.shell: |
+        ADMIN_PW=$(kubectl get secret forgejo-admin -n forgejo -o jsonpath='{.data.password}' | base64 -d)
+        AUTH=$(printf '%s' "forgejo_admin:$ADMIN_PW" | base64 -w0 2>/dev/null || printf '%s' "forgejo_admin:$ADMIN_PW" | base64)
+        PUB_KEY=$(kubectl get secret gitops-ssh-key -n flux-system -o jsonpath='{.data.identity\.pub}' | base64 -d)
+        kubectl exec -n forgejo deploy/forgejo -c forgejo -- \
+          wget -qO- --post-data="{\"title\":\"flux-gitops\",\"key\":\"$PUB_KEY\",\"read_only\":false}" \
+          --header="Content-Type: application/json" \
+          --header="Authorization: Basic $AUTH" \
+          http://localhost:3000/api/v1/repos/gitops/wallet-local-gitops/keys
+      changed_when: true
 
     - name: Update GitRepository to point at Forgejo
       ansible.builtin.shell: |
