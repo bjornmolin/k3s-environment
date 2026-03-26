@@ -308,11 +308,12 @@
 - name: Mirror GitHub repo to Forgejo
   when: "'404' in gitops_repo_check.stderr and gitops.forgejo_mirror is defined"
   ansible.builtin.shell: |
-    AUTH=$(echo -n "forgejo_admin:$(kubectl get secret forgejo-admin -n forgejo -o jsonpath='{.data.password}' | base64 -d)" | base64)
+    ADMIN_PW=$(kubectl get secret forgejo-admin -n forgejo -o jsonpath='{.data.password}' | base64 -d)
+    AUTH=$(printf '%s' "forgejo_admin:$ADMIN_PW" | base64 -w0 2>/dev/null || printf '%s' "forgejo_admin:$ADMIN_PW" | base64)
     kubectl exec -n forgejo deploy/forgejo -c forgejo -- \
       wget -qO- --post-data='{"clone_addr":"{{ gitops.forgejo_mirror }}","repo_name":"wallet-local-gitops","repo_owner":"gitops","service":"github"}' \
       --header="Content-Type: application/json" \
-      --header="Authorization: Basic $AUTH" \
+      --header="Authorization: Basic '"$AUTH"'" \
       http://localhost:3000/api/v1/repos/migrate
   changed_when: true
 
@@ -359,9 +360,11 @@
 
         - name: Add deploy key to Forgejo repo via API
           ansible.builtin.shell: |
-            AUTH=$(echo -n "forgejo_admin:$(kubectl get secret forgejo-admin -n forgejo -o jsonpath='{.data.password}' | base64 -d)" | base64)
+            ADMIN_PW=$(kubectl get secret forgejo-admin -n forgejo -o jsonpath='{.data.password}' | base64 -d)
+            AUTH=$(printf '%s' "forgejo_admin:$ADMIN_PW" | base64 -w0 2>/dev/null || printf '%s' "forgejo_admin:$ADMIN_PW" | base64)
+            PUB_KEY="{{ forgejo_deploy_pub_key.stdout }}"
             kubectl exec -n forgejo deploy/forgejo -c forgejo -- \
-              wget -qO- --post-data='{"title":"flux-gitops","key":"{{ forgejo_deploy_pub_key.stdout }}","read_only":false}' \
+              wget -qO- --post-data="{\"title\":\"flux-gitops\",\"key\":\"$PUB_KEY\",\"read_only\":false}" \
               --header="Content-Type: application/json" \
               --header="Authorization: Basic $AUTH" \
               http://localhost:3000/api/v1/repos/gitops/wallet-local-gitops/keys
