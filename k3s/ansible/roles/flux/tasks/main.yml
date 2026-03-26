@@ -328,19 +328,26 @@
   register: gitops_repo_check
   changed_when: false
 
-- name: Create gitops repo and push from GitHub
+- name: Create API token for gitops user
   when: "'missing' in gitops_repo_check.stdout and gitops.forgejo_mirror is defined"
   ansible.builtin.shell: |
     kubectl exec -n forgejo deploy/forgejo -c forgejo -- \
-      forgejo admin user change-password --username gitops --password gitopspass123
-    GITOPS_AUTH=$(printf '%s' 'gitops:gitopspass123' | base64)
+      forgejo admin user generate-access-token --username gitops --token-name flux-setup --scopes all 2>&1 | grep -oP 'Access token was successfully created: \K.*'
+  register: gitops_api_token
+
+- name: Create gitops repo and push from GitHub
+  when: "'missing' in gitops_repo_check.stdout and gitops.forgejo_mirror is defined"
+  ansible.builtin.shell: |
+    TOKEN="{{ gitops_api_token.stdout }}"
+    # Create repo
     kubectl exec -n forgejo deploy/forgejo -c forgejo -- \
-      wget -qO- '--post-data={"name":"wallet-local-gitops"}' \
+      wget -qO- '--post-data={"name":"wallet-local-gitops","private":false}' \
       --header="Content-Type: application/json" \
-      --header="Authorization: Basic $GITOPS_AUTH" \
+      --header="Authorization: token $TOKEN" \
       http://localhost:3000/api/v1/user/repos
+    # Clone from GitHub and push using token auth
     kubectl exec -n forgejo deploy/forgejo -c forgejo -- \
-      sh -c 'cd /tmp && rm -rf wlg.git && git clone --bare {{ gitops.forgejo_mirror }} wlg.git && cd wlg.git && git push --mirror http://gitops:gitopspass123@localhost:3000/gitops/wallet-local-gitops.git && rm -rf /tmp/wlg.git'
+      sh -c "cd /tmp && rm -rf wlg.git && git clone --bare {{ gitops.forgejo_mirror }} wlg.git && cd wlg.git && git -c http.extraHeader='Authorization: token $TOKEN' push --mirror http://localhost:3000/gitops/wallet-local-gitops.git && rm -rf /tmp/wlg.git"
 
 - name: Get Forgejo admin auth token
   ansible.builtin.shell: |
