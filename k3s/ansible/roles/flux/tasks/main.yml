@@ -292,12 +292,15 @@
 - name: Create gitops user in Forgejo
   when: "'404' in gitops_user_check.stdout"
   ansible.builtin.shell: |
-    GITOPS_PW=$(openssl rand -base64 16)
-    kubectl run forgejo-api-create-user --rm -i --restart=Never --image=curlimages/curl -- \
-      curl -sf -X POST {{ forgejo_api }}/admin/users \
-      -H 'Content-Type: application/json' \
-      -u "forgejo_admin:{{ forgejo_admin_pw.stdout }}" \
-      -d "{\"username\":\"gitops\",\"password\":\"$GITOPS_PW\",\"email\":\"gitops@dev.local\",\"must_change_password\":false}"
+    ADMIN_PW='{{ forgejo_admin_pw.stdout }}'
+    GITOPS_PW=$(openssl rand -hex 16)
+    cat <<EOFJSON > /tmp/forgejo-create-user.json
+    {"username":"gitops","password":"$GITOPS_PW","email":"gitops@dev.local","must_change_password":false}
+    EOFJSON
+    kubectl run forgejo-api-create-user --rm -i --restart=Never \
+      --overrides='{"spec":{"containers":[{"name":"curl","image":"curlimages/curl","stdin":true,"command":["curl","-sf","-X","POST","{{ forgejo_api }}/admin/users","-H","Content-Type: application/json","-u","forgejo_admin:'"$ADMIN_PW"'","-d","@-"]}]}}' \
+      --image=curlimages/curl < /tmp/forgejo-create-user.json
+    rm -f /tmp/forgejo-create-user.json
   changed_when: true
 
 - name: Check if gitops repo exists in Forgejo
@@ -310,12 +313,15 @@
 
 - name: Mirror GitHub repo to Forgejo
   when: "'404' in gitops_repo_check.stdout and gitops.forgejo_mirror is defined"
-  ansible.builtin.shell: >
-    kubectl run forgejo-api-migrate --rm -i --restart=Never --image=curlimages/curl --
-    curl -sf -X POST {{ forgejo_api }}/repos/migrate
-    -H 'Content-Type: application/json'
-    -u "forgejo_admin:{{ forgejo_admin_pw.stdout }}"
-    -d '{"clone_addr":"{{ gitops.forgejo_mirror }}","repo_name":"wallet-local-gitops","repo_owner":"gitops","service":"github"}'
+  ansible.builtin.shell: |
+    ADMIN_PW='{{ forgejo_admin_pw.stdout }}'
+    cat <<'EOFJSON' > /tmp/forgejo-migrate.json
+    {"clone_addr":"{{ gitops.forgejo_mirror }}","repo_name":"wallet-local-gitops","repo_owner":"gitops","service":"github"}
+    EOFJSON
+    kubectl run forgejo-api-migrate --rm -i --restart=Never \
+      --overrides='{"spec":{"containers":[{"name":"curl","image":"curlimages/curl","stdin":true,"command":["curl","-sf","-X","POST","{{ forgejo_api }}/repos/migrate","-H","Content-Type: application/json","-u","forgejo_admin:'"$ADMIN_PW"'","-d","@-"]}]}}' \
+      --image=curlimages/curl < /tmp/forgejo-migrate.json
+    rm -f /tmp/forgejo-migrate.json
   changed_when: true
 
 - name: Generate Forgejo SSH deploy key and switch Flux source
@@ -360,12 +366,15 @@
           changed_when: false
 
         - name: Add deploy key to Forgejo repo
-          ansible.builtin.shell: >
-            kubectl run forgejo-api-add-key --rm -i --restart=Never --image=curlimages/curl --
-            curl -sf -X POST {{ forgejo_api }}/repos/gitops/wallet-local-gitops/keys
-            -H 'Content-Type: application/json'
-            -u "forgejo_admin:{{ forgejo_admin_pw.stdout }}"
-            -d '{"title":"flux-gitops","key":"{{ forgejo_deploy_pub_key.stdout }}","read_only":false}'
+          ansible.builtin.shell: |
+            ADMIN_PW='{{ forgejo_admin_pw.stdout }}'
+            cat <<EOFJSON > /tmp/forgejo-add-key.json
+            {"title":"flux-gitops","key":"{{ forgejo_deploy_pub_key.stdout }}","read_only":false}
+            EOFJSON
+            kubectl run forgejo-api-add-key --rm -i --restart=Never \
+              --overrides='{"spec":{"containers":[{"name":"curl","image":"curlimages/curl","stdin":true,"command":["curl","-sf","-X","POST","{{ forgejo_api }}/repos/gitops/wallet-local-gitops/keys","-H","Content-Type: application/json","-u","forgejo_admin:'"$ADMIN_PW"'","-d","@-"]}]}}' \
+              --image=curlimages/curl < /tmp/forgejo-add-key.json
+            rm -f /tmp/forgejo-add-key.json
           changed_when: true
           failed_when: false
 
