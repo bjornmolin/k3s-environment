@@ -88,6 +88,38 @@
   register: ns_apply
   changed_when: "'configured' in ns_apply.stdout or 'created' in ns_apply.stdout"
 
+- name: Flush stale Cilium iptables rules before Helm fetches (Linux)
+  ansible.builtin.shell: |
+    sudo iptables -t nat -F OLD_CILIUM_POST_nat 2>/dev/null || true
+    sudo iptables -t nat -X OLD_CILIUM_POST_nat 2>/dev/null || true
+  changed_when: false
+  when: ansible_facts['os_family'] == "Debian"
+
+- name: Force reconcile all Helm repositories
+  ansible.builtin.shell: |
+    flux reconcile source helm --all 2>/dev/null || true
+    sleep 5
+  changed_when: false
+
+- name: Verify DNS works inside cluster (Linux)
+  ansible.builtin.shell: |
+    kubectl run dns-verify --rm -i --restart=Never --image=busybox --timeout=30s -- \
+      nslookup charts.jetstack.io 2>&1 | tail -3
+  register: dns_verify
+  changed_when: false
+  failed_when: false
+  when: ansible_facts['os_family'] == "Debian"
+
+- name: Fix CoreDNS if DNS is broken (Linux)
+  when: "ansible_facts['os_family'] == 'Debian' and dns_verify.rc is defined and dns_verify.rc != 0"
+  ansible.builtin.shell: |
+    sudo iptables -t nat -F OLD_CILIUM_POST_nat 2>/dev/null || true
+    sudo iptables -t nat -X OLD_CILIUM_POST_nat 2>/dev/null || true
+    kubectl rollout restart daemonset cilium -n kube-system
+    kubectl rollout restart deployment coredns -n kube-system
+    sleep 20
+    flux reconcile source helm --all 2>/dev/null || true
+
 # --- cert-manager ---
 
 - name: Apply cert-manager HelmRelease
