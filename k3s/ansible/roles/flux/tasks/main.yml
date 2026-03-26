@@ -313,7 +313,7 @@
     kubectl exec -n forgejo deploy/forgejo -c forgejo -- \
       wget -qO- --post-data='{"clone_addr":"{{ gitops.forgejo_mirror }}","repo_name":"wallet-local-gitops","repo_owner":"gitops","service":"github"}' \
       --header="Content-Type: application/json" \
-      --header="Authorization: Basic '"$AUTH"'" \
+      --header="Authorization: Basic $AUTH" \
       http://localhost:3000/api/v1/repos/migrate
   changed_when: true
 
