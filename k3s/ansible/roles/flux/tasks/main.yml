@@ -286,7 +286,7 @@
   failed_when: false
 
 - name: Create gitops user in Forgejo via CLI
-  when: "'404' in gitops_user_check.stderr or gitops_user_check.rc != 0"
+  when: "'404' in gitops_user_check.stdout or '404' in gitops_user_check.stderr or gitops_user_check.rc != 0"
   ansible.builtin.shell: >
     kubectl exec -n forgejo deploy/forgejo -c forgejo --
     forgejo admin user create
@@ -306,7 +306,7 @@
   failed_when: false
 
 - name: Mirror GitHub repo to Forgejo
-  when: "'404' in gitops_repo_check.stderr and gitops.forgejo_mirror is defined"
+  when: "('404' in gitops_repo_check.stdout or '404' in gitops_repo_check.stderr) and gitops.forgejo_mirror is defined"
   ansible.builtin.shell: |
     ADMIN_PW=$(kubectl get secret forgejo-admin -n forgejo -o jsonpath='{.data.password}' | base64 -d)
     AUTH=$(printf '%s' "forgejo_admin:$ADMIN_PW" | base64 -w0 2>/dev/null || printf '%s' "forgejo_admin:$ADMIN_PW" | base64)
