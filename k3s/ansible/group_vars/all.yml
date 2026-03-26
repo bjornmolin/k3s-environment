@@ -16,4 +16,4 @@ flux_base_path: "{{ playbook_dir }}/../flux"
 flux_manifests_path: "{{ playbook_dir }}/../flux/clusters/dev"
 
 # kubeconfig
-kubeconfig_path: "{{ ansible_env.HOME }}/.kube/config"
+kubeconfig_path: "{{ ansible_facts['env']['HOME'] }}/.kube/config"

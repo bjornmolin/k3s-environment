@@ -1,6 +1,6 @@
 ---
 - name: Include OS-specific prerequisites
-  ansible.builtin.include_tasks: "{{ ansible_os_family | lower }}.yml"
+  ansible.builtin.include_tasks: "{{ ansible_facts['os_family'] | lower }}.yml"
 
 - name: Verify kubectl is available
   ansible.builtin.command: kubectl version --client

@@ -1,3 +1,7 @@
+# Cosign keys (generated per cluster)
+cosign.key
+cosign.pub
+
 HELP.md
 .gradle
 build/

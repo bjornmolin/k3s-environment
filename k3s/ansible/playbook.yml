@@ -12,13 +12,13 @@
 
   tasks:
     - name: Start k3s (macOS - Lima VM)
-      when: ansible_os_family == "Darwin"
+      when: ansible_facts['os_family'] == "Darwin"
       ansible.builtin.include_role:
         name: k3s
         tasks_from: darwin
 
     - name: Verify k3s is running (Linux)
-      when: ansible_os_family == "Debian"
+      when: ansible_facts['os_family'] == "Debian"
       block:
         - name: Check k3s API server
           ansible.builtin.command: kubectl get nodes
@@ -30,7 +30,7 @@
 
     - name: Create .kube directory
       ansible.builtin.file:
-        path: "{{ ansible_env.HOME }}/.kube"
+        path: "{{ ansible_facts['env']['HOME'] }}/.kube"
         state: directory
         mode: "0755"
 

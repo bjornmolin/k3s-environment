@@ -103,7 +103,7 @@
     src: /etc/rancher/k3s/k3s.yaml
     dest: "{{ kubeconfig_path }}"
     remote_src: true
-    owner: "{{ ansible_env.USER }}"
+    owner: "{{ ansible_facts['env']['USER'] }}"
     mode: "0600"
   become: true
 

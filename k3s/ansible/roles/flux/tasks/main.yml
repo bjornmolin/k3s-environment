@@ -16,7 +16,7 @@
     sudo iptables -t nat -F OLD_CILIUM_POST_nat 2>/dev/null || true
     sudo iptables -t nat -X OLD_CILIUM_POST_nat 2>/dev/null || true
   changed_when: false
-  when: ansible_os_family == "Debian"
+  when: ansible_facts['os_family'] == "Debian"
 
 - name: Check if Cilium is installed
   ansible.builtin.command: helm status cilium -n kube-system
@@ -132,10 +132,10 @@
       update-ca-certificates
     '
   changed_when: false
-  when: ansible_os_family == "Darwin"
+  when: ansible_facts['os_family'] == "Darwin"
 
 - name: Copy mkcert CA to Linux trust store
-  when: ansible_os_family == "Debian"
+  when: ansible_facts['os_family'] == "Debian"
   block:
     - name: Copy CA certificate
       ansible.builtin.copy:
