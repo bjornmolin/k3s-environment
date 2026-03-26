@@ -1,4 +1,20 @@
 ---
+- name: Increase inotify limits
+  ansible.builtin.copy:
+    content: |
+      fs.inotify.max_user_instances=512
+      fs.inotify.max_user_watches=524288
+    dest: /etc/sysctl.d/99-inotify.conf
+    mode: "0644"
+  become: true
+  register: inotify_conf
+
+- name: Apply sysctl changes
+  ansible.builtin.command: sysctl --system
+  become: true
+  changed_when: false
+  when: inotify_conf.changed
+
 - name: Check if k3s is installed
   ansible.builtin.stat:
     path: /usr/local/bin/k3s

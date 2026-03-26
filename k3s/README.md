@@ -33,8 +33,8 @@ make up
 
 | Target | Description | Sudo |
 |--------|-------------|------|
-| `make setup` | One-time: install tools (kubectl, helm, flux, mkcert, cosign, kubeseal) + configure dnsmasq | yes |
-| `make up` | Start k3s, install Cilium, deploy all infrastructure + apps via Flux | no |
+| `make setup` | One-time: install tools, k3s (Linux), dnsmasq, sysctl (requires sudo) | yes |
+| `make up` | Start k3s (macOS), install Cilium, deploy all infrastructure + apps via Flux | no |
 | `make sync` | Re-apply infrastructure Flux manifests after editing `flux/` files | no |
 | `make sync-apps` | Force Flux to re-pull gitops repo and reconcile apps | no |
 | `make reconcile` | Force all HelmReleases to reconcile immediately | no |

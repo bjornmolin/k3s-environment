@@ -1,6 +1,6 @@
 ---
 # One-time system setup requiring sudo.
-# Installs system packages (Linux), dnsmasq, and configures DNS resolution.
+# Installs tools, k3s (Linux), dnsmasq, and configures DNS resolution.
 # Run once with: make setup
 - name: System setup (requires sudo)
   hosts: localhost
@@ -10,4 +10,5 @@
 
   roles:
     - prerequisites
+    - k3s
     - dnsmasq
