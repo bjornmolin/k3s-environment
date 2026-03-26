@@ -328,20 +328,21 @@
   register: gitops_repo_check
   changed_when: false
 
-- name: Create API token for gitops user
-  when: "'missing' in gitops_repo_check.stdout and gitops.forgejo_mirror is defined"
-  ansible.builtin.shell: |
-    kubectl exec -n forgejo deploy/forgejo -c forgejo -- \
-      forgejo admin user generate-access-token --username gitops --token-name flux-setup --scopes all 2>&1 | grep -oP 'Access token was successfully created: \K.*'
-  register: gitops_api_token
-
 - name: Create gitops repo and push from GitHub
   when: "'missing' in gitops_repo_check.stdout and gitops.forgejo_mirror is defined"
   ansible.builtin.shell: |
-    TOKEN="{{ gitops_api_token.stdout }}"
+    # Generate API token for gitops user
+    kubectl exec -n forgejo deploy/forgejo -c forgejo -- \
+      forgejo admin user delete-access-token --username gitops --token-name flux-setup 2>/dev/null || true
+    TOKEN=$(kubectl exec -n forgejo deploy/forgejo -c forgejo -- \
+      forgejo admin user generate-access-token --username gitops --token-name flux-setup --scopes all 2>&1 | awk -F': ' '/Access token/{print $NF}')
+    if [ -z "$TOKEN" ]; then
+      echo "ERROR: Failed to generate API token"
+      exit 1
+    fi
     # Create repo
     kubectl exec -n forgejo deploy/forgejo -c forgejo -- \
-      wget -qO- '--post-data={"name":"wallet-local-gitops","private":false}' \
+      wget -qO- "--post-data={\"name\":\"wallet-local-gitops\",\"private\":false}" \
       --header="Content-Type: application/json" \
       --header="Authorization: token $TOKEN" \
       http://localhost:3000/api/v1/user/repos
