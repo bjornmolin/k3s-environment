@@ -265,6 +265,42 @@
   register: infra_apply2
   changed_when: "'configured' in infra_apply2.stdout or 'created' in infra_apply2.stdout"
 
+# --- Update dnsmasq with Gateway IP on Linux ---
+
+- name: Get Gateway external IP (Linux)
+  when: ansible_facts['os_family'] == "Debian"
+  ansible.builtin.shell: >
+    kubectl get gateway dev-local -o jsonpath='{.status.addresses[0].value}'
+  register: gateway_ip
+  changed_when: false
+  retries: 10
+  delay: 10
+  until: gateway_ip.stdout | length > 0
+
+- name: Update dnsmasq with Gateway IP (Linux)
+  when: ansible_facts['os_family'] == "Debian" and gateway_ip.stdout | length > 0
+  block:
+    - name: Set Gateway IP in dnsmasq config
+      ansible.builtin.lineinfile:
+        path: /etc/dnsmasq.d/dev-local.conf
+        regexp: '^address='
+        line: "address=/dev.local/{{ gateway_ip.stdout }}"
+      become: true
+      register: dnsmasq_updated
+
+    - name: Restart dnsmasq
+      ansible.builtin.systemd:
+        name: dnsmasq
+        state: restarted
+      become: true
+      when: dnsmasq_updated.changed
+
+    - name: Restart systemd-resolved (if active)
+      ansible.builtin.shell: systemctl is-active systemd-resolved && systemctl restart systemd-resolved || true
+      become: true
+      changed_when: false
+      when: dnsmasq_updated.changed
+
 # --- Phase 1: Bootstrap gitops from public GitHub repo (HTTPS, no auth) ---
 
 - name: Apply GitRepository source (public HTTPS, no auth needed)
@@ -324,18 +360,21 @@
 - name: Check if gitops repo exists in Forgejo
   ansible.builtin.shell: |
     kubectl exec -n forgejo deploy/forgejo -c forgejo -- \
-      sh -c 'test -d /data/gitea/repositories/gitops/wallet-local-gitops.git && echo exists || echo missing'
+      sh -c 'test -d /data/git/gitea-repositories/gitops/wallet-local-gitops.git && echo exists || echo missing'
   register: gitops_repo_check
   changed_when: false
 
 - name: Create gitops repo and push from GitHub
   when: "'missing' in gitops_repo_check.stdout and gitops.forgejo_mirror is defined"
   ansible.builtin.shell: |
-    # Generate API token for gitops user
+    # Delete stale token via API (delete-access-token CLI removed in Forgejo 14)
+    ADMIN_PW=$(kubectl get secret forgejo-admin -n forgejo -o jsonpath='{.data.password}' | base64 -d)
     kubectl exec -n forgejo deploy/forgejo -c forgejo -- \
-      forgejo admin user delete-access-token --username gitops --token-name flux-setup 2>/dev/null || true
+      curl -sf -X DELETE -u "forgejo_admin:$ADMIN_PW" \
+      http://localhost:3000/api/v1/users/gitops/tokens/flux-setup 2>/dev/null || true
+    # Generate API token for gitops user
     TOKEN=$(kubectl exec -n forgejo deploy/forgejo -c forgejo -- \
-      forgejo admin user generate-access-token --username gitops --token-name flux-setup --scopes all 2>&1 | awk -F': ' '/Access token/{print $NF}')
+      forgejo admin user generate-access-token --username gitops --token-name flux-setup --scopes all --raw 2>/dev/null)
     if [ -z "$TOKEN" ]; then
       echo "ERROR: Failed to generate API token"
       exit 1
