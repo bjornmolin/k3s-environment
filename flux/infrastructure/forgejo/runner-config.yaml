@@ -7,6 +7,3 @@ data:
   config.yaml: |
     log:
       level: info
-    container:
-      privileged: true
-      network: host

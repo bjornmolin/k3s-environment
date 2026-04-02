@@ -91,26 +91,17 @@ mirror:
 
 ## Push cosign key to Forgejo org secrets for CI signing
 ci-secrets:
-	@COSIGN_KEY=$$(kubectl get secret cosign-key -n flux-system -o jsonpath='{.data.cosign\.key}' | base64 -d) && \
+	@COSIGN_KEY=$$(kubectl get secret cosign-key -n flux-system -o jsonpath='{.data.cosign\.key}') && \
 	ADMIN_PW=$$(kubectl get secret forgejo-admin -n forgejo -o jsonpath='{.data.password}' | base64 -d) && \
-	AUTH=$$(printf 'forgejo_admin:%s' "$$ADMIN_PW" | base64) && \
 	EXEC="kubectl exec -n forgejo deploy/forgejo -c forgejo --" && \
 	COUNT=$$(yq '.mirrors | length' gitops-config.yaml) && \
 	for i in $$(seq 0 $$((COUNT - 1))); do \
 		OWNER=$$(yq ".mirrors[$$i].owner" gitops-config.yaml) && \
 		echo "--- Setting cosign secrets for org $$OWNER ---" && \
-		$$EXEC wget -qO /dev/null \
-			--method=PUT \
-			--body-data="{\"data\":\"$$COSIGN_KEY\",\"visibility\":\"all\"}" \
-			--header="Content-Type: application/json" \
-			--header="Authorization: Basic $$AUTH" \
-			http://localhost:3000/api/v1/orgs/$$OWNER/actions/secrets/COSIGN_PRIVATE_KEY 2>/dev/null && \
-		$$EXEC wget -qO /dev/null \
-			--method=PUT \
-			--body-data="{\"data\":\"\",\"visibility\":\"all\"}" \
-			--header="Content-Type: application/json" \
-			--header="Authorization: Basic $$AUTH" \
-			http://localhost:3000/api/v1/orgs/$$OWNER/actions/secrets/COSIGN_PASSWORD 2>/dev/null && \
+		$$EXEC curl -sf -X PUT -u "forgejo_admin:$$ADMIN_PW" \
+			-H "Content-Type: application/json" \
+			-d "{\"data\":\"$$COSIGN_KEY\",\"visibility\":\"all\"}" \
+			http://localhost:3000/api/v1/orgs/$$OWNER/actions/secrets/COSIGN_PRIVATE_KEY > /dev/null && \
 		echo "  Done"; \
 	done
 

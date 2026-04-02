@@ -1,0 +1,35 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-internal-images
+spec:
+  validationFailureAction: Enforce
+  background: true
+  webhookTimeoutSeconds: 30
+  rules:
+    - name: verify-cosign-signature
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      imageExtractors:
+        Pod:
+          - name: "containers"
+            path: /spec/containers/*/image
+          - name: "initcontainers"
+            path: /spec/initContainers/*/image
+      verifyImages:
+        - imageReferences:
+            - "zot.registry.svc.cluster.local:5000/*"
+          attestors:
+            - entries:
+                - keys:
+                    publicKeys: |-
+                      -----BEGIN PUBLIC KEY-----
+                      MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEdRD06uGvVe3x4LokrhfY7DY5J05o
+                      OedOXvl1u/APb2mjK586iMaO9uXX9XVkfM3gmN5IfAGXJyEX7IwdYYftzA==
+                      -----END PUBLIC KEY-----
+                    signatureAlgorithm: sha256
+          mutateDigest: true
+          verifyDigest: true
