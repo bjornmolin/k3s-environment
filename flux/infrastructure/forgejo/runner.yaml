@@ -32,7 +32,7 @@ spec:
                   --labels ubuntu-latest:docker://node:20-bookworm,buildah:docker://quay.io/buildah/stable \
                   --no-interactive
               fi
-              forgejo-runner daemon
+              forgejo-runner --config /etc/runner-config/config.yaml daemon
           env:
             - name: DOCKER_HOST
               value: tcp://localhost:2376
@@ -41,6 +41,9 @@ spec:
               mountPath: /data
             - name: runner-token
               mountPath: /etc/runner
+              readOnly: true
+            - name: runner-config
+              mountPath: /etc/runner-config
               readOnly: true
         - name: dind
           image: docker:dind
@@ -60,3 +63,6 @@ spec:
         - name: runner-token
           secret:
             secretName: forgejo-runner-token
+        - name: runner-config
+          configMap:
+            name: forgejo-runner-config

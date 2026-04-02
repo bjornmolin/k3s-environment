@@ -3,4 +3,5 @@ kind: Kustomization
 resources:
   - helmrelease.yaml
   - httproute.yaml
+  - runner-config.yaml
   - runner.yaml

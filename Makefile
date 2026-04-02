@@ -11,7 +11,7 @@ else
 NERDCTL := limactl shell k3s sudo nerdctl --address /run/k3s/containerd/containerd.sock
 endif
 
-.PHONY: setup up sync sync-apps reconcile mirror status stop clean help
+.PHONY: setup up sync sync-apps reconcile mirror ci-secrets status stop clean help
 
 ## One-time system setup (requires sudo): install tools, configure dnsmasq
 setup:
@@ -89,6 +89,31 @@ mirror:
 		fi; \
 	done
 
+## Push cosign key to Forgejo org secrets for CI signing
+ci-secrets:
+	@COSIGN_KEY=$$(kubectl get secret cosign-key -n flux-system -o jsonpath='{.data.cosign\.key}' | base64 -d) && \
+	ADMIN_PW=$$(kubectl get secret forgejo-admin -n forgejo -o jsonpath='{.data.password}' | base64 -d) && \
+	AUTH=$$(printf 'forgejo_admin:%s' "$$ADMIN_PW" | base64) && \
+	EXEC="kubectl exec -n forgejo deploy/forgejo -c forgejo --" && \
+	COUNT=$$(yq '.mirrors | length' gitops-config.yaml) && \
+	for i in $$(seq 0 $$((COUNT - 1))); do \
+		OWNER=$$(yq ".mirrors[$$i].owner" gitops-config.yaml) && \
+		echo "--- Setting cosign secrets for org $$OWNER ---" && \
+		$$EXEC wget -qO /dev/null \
+			--method=PUT \
+			--body-data="{\"data\":\"$$COSIGN_KEY\",\"visibility\":\"all\"}" \
+			--header="Content-Type: application/json" \
+			--header="Authorization: Basic $$AUTH" \
+			http://localhost:3000/api/v1/orgs/$$OWNER/actions/secrets/COSIGN_PRIVATE_KEY 2>/dev/null && \
+		$$EXEC wget -qO /dev/null \
+			--method=PUT \
+			--body-data="{\"data\":\"\",\"visibility\":\"all\"}" \
+			--header="Content-Type: application/json" \
+			--header="Authorization: Basic $$AUTH" \
+			http://localhost:3000/api/v1/orgs/$$OWNER/actions/secrets/COSIGN_PASSWORD 2>/dev/null && \
+		echo "  Done"; \
+	done
+
 ## Show Flux status
 status:
 	@echo "=== Git Sources ==="
@@ -151,6 +176,7 @@ help:
 	@echo "  sync-apps  - Force Flux to re-pull gitops repo and reconcile apps"
 	@echo "  reconcile  - Force Flux to reconcile HelmReleases immediately"
 	@echo "  mirror     - Mirror public GitHub repos to cluster Forgejo"
+	@echo "  ci-secrets - Push cosign key to Forgejo org secrets for CI"
 	@echo "  status     - Show Flux sources, kustomizations, and HelmReleases"
 	@echo "  stop       - Stop k3s (preserves data)"
 	@echo "  clean      - Destroy k3s completely"

@@ -39,6 +39,7 @@ make up
 | `make sync-apps` | Force Flux to re-pull gitops repo and reconcile apps | no |
 | `make reconcile` | Force all HelmReleases to reconcile immediately | no |
 | `make mirror` | Mirror public GitHub repos to cluster Forgejo | no |
+| `make ci-secrets` | Push cosign key to Forgejo org secrets for CI | no |
 | `make status` | Show Flux sources, kustomizations, and HelmReleases | no |
 | `make stop` | Stop k3s (preserves data) | no |
 | `make clean` | Destroy k3s VM completely | no |
@@ -190,6 +191,23 @@ The runner is deployed with `replicas: 0` by default. To activate:
 kubectl create secret generic forgejo-runner-token -n forgejo --from-literal=token=YOUR_TOKEN
 kubectl scale deployment forgejo-runner -n forgejo --replicas=1
 ```
+
+### CI for container image builds
+
+After the runner is active, set up CI secrets and mirror the source repo:
+
+```bash
+make mirror      # Mirror GitHub repos to Forgejo
+make ci-secrets  # Push cosign signing key to Forgejo org secrets
+```
+
+The `diggsweden/wallet-r2ps` repo includes a Forgejo Actions workflow that on push to `main`:
+
+1. Builds `rust-r2ps-worker` with **buildah**
+2. Pushes to the Zot registry (`registry.dev.local`)
+3. Signs the image with **cosign**
+
+Runner config (`runner-config.yaml`) sets `container.privileged: true` and `container.network: host` so buildah works and job containers can reach in-cluster services.
 
 ## Observability Stack
 
