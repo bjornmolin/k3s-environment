@@ -81,7 +81,7 @@ mirror:
 			echo "  Already exists, skipping"; \
 		else \
 			echo "  Creating mirror..." && \
-			$$EXEC wget -qO- --post-data="{\"clone_addr\":\"$$URL\",\"repo_name\":\"$$NAME\",\"repo_owner\":\"$$OWNER\",\"service\":\"github\",\"mirror\":true}" \
+			$$EXEC wget -qO- --post-data="{\"clone_addr\":\"$$URL\",\"repo_name\":\"$$NAME\",\"repo_owner\":\"$$OWNER\",\"service\":\"github\",\"mirror\":false}" \
 				--header="Content-Type: application/json" \
 				--header="Authorization: Basic $$AUTH" \
 				http://localhost:3000/api/v1/repos/migrate && \
