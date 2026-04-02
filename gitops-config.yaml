@@ -8,5 +8,11 @@ gitops:
   # Public URL to mirror into Forgejo on first boot
   forgejo_mirror: https://github.com/bjornmolin/wallet-local-gitops.git
 
+# Public GitHub repos to mirror into cluster Forgejo
+mirrors:
+  - url: https://github.com/diggsweden/wallet-r2ps.git
+    owner: diggsweden
+    name: wallet-r2ps
+
 # Container image builds (Forgejo Actions + Buildah + Cosign)
 builds: []

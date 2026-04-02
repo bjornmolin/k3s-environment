@@ -11,7 +11,7 @@ else
 NERDCTL := limactl shell k3s sudo nerdctl --address /run/k3s/containerd/containerd.sock
 endif
 
-.PHONY: setup up sync sync-apps reconcile status stop clean help
+.PHONY: setup up sync sync-apps reconcile mirror status stop clean help
 
 ## One-time system setup (requires sudo): install tools, configure dnsmasq
 setup:
@@ -59,6 +59,35 @@ reconcile:
 	flux reconcile helmrelease kyverno -n kyverno
 	flux reconcile helmrelease kafbat-ui -n default
 	flux reconcile helmrelease valkey -n default
+
+## Mirror public GitHub repos to cluster Forgejo (reads gitops-config.yaml)
+mirror:
+	@ADMIN_PW=$$(kubectl get secret forgejo-admin -n forgejo -o jsonpath='{.data.password}' | base64 -d) && \
+	AUTH=$$(printf 'forgejo_admin:%s' "$$ADMIN_PW" | base64) && \
+	EXEC="kubectl exec -n forgejo deploy/forgejo -c forgejo --" && \
+	COUNT=$$(yq '.mirrors | length' gitops-config.yaml) && \
+	for i in $$(seq 0 $$((COUNT - 1))); do \
+		URL=$$(yq ".mirrors[$$i].url" gitops-config.yaml) && \
+		OWNER=$$(yq ".mirrors[$$i].owner" gitops-config.yaml) && \
+		NAME=$$(yq ".mirrors[$$i].name" gitops-config.yaml) && \
+		echo "--- Mirroring $$OWNER/$$NAME ---" && \
+		$$EXEC wget -qO /dev/null --post-data="{\"username\":\"$$OWNER\",\"visibility\":\"public\",\"full_name\":\"$$OWNER\"}" \
+			--header="Content-Type: application/json" \
+			--header="Authorization: Basic $$AUTH" \
+			http://localhost:3000/api/v1/orgs 2>/dev/null || true && \
+		if $$EXEC wget -qO /dev/null \
+			--header="Authorization: Basic $$AUTH" \
+			http://localhost:3000/api/v1/repos/$$OWNER/$$NAME 2>/dev/null; then \
+			echo "  Already exists, skipping"; \
+		else \
+			echo "  Creating mirror..." && \
+			$$EXEC wget -qO- --post-data="{\"clone_addr\":\"$$URL\",\"repo_name\":\"$$NAME\",\"repo_owner\":\"$$OWNER\",\"service\":\"github\",\"mirror\":true}" \
+				--header="Content-Type: application/json" \
+				--header="Authorization: Basic $$AUTH" \
+				http://localhost:3000/api/v1/repos/migrate && \
+			echo "  Done"; \
+		fi; \
+	done
 
 ## Show Flux status
 status:
@@ -121,6 +150,7 @@ help:
 	@echo "  sync       - Re-apply infrastructure Flux manifests"
 	@echo "  sync-apps  - Force Flux to re-pull gitops repo and reconcile apps"
 	@echo "  reconcile  - Force Flux to reconcile HelmReleases immediately"
+	@echo "  mirror     - Mirror public GitHub repos to cluster Forgejo"
 	@echo "  status     - Show Flux sources, kustomizations, and HelmReleases"
 	@echo "  stop       - Stop k3s (preserves data)"
 	@echo "  clean      - Destroy k3s completely"

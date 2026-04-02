@@ -38,6 +38,7 @@ make up
 | `make sync` | Re-apply infrastructure Flux manifests after editing `flux/` files | no |
 | `make sync-apps` | Force Flux to re-pull gitops repo and reconcile apps | no |
 | `make reconcile` | Force all HelmReleases to reconcile immediately | no |
+| `make mirror` | Mirror public GitHub repos to cluster Forgejo | no |
 | `make status` | Show Flux sources, kustomizations, and HelmReleases | no |
 | `make stop` | Stop k3s (preserves data) | no |
 | `make clean` | Destroy k3s VM completely | no |
@@ -133,6 +134,25 @@ apps/
   valkey/                  Valkey (Redis alternative, Sentinel HA)
   headlamp/                Headlamp Kubernetes UI
 ```
+
+## Mirroring GitHub Repos
+
+Mirror public GitHub repos into the cluster Forgejo instance. Configure repos in `gitops-config.yaml`:
+
+```yaml
+mirrors:
+  - url: https://github.com/diggsweden/wallet-r2ps.git
+    owner: diggsweden
+    name: wallet-r2ps
+```
+
+Then run:
+
+```bash
+make mirror
+```
+
+This creates a Forgejo org matching the GitHub org (if needed) and sets up a mirror repo with automatic periodic sync. Already-mirrored repos are skipped.
 
 ## Modifying Infrastructure
 
